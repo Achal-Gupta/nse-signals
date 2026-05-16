@@ -1,0 +1,13 @@
+# v0.1.0 watchlist — hardcoded large-cap stocks.
+# In v0.3.0 this gets replaced by a dynamic Universe Agent.
+stocks:
+  - symbol: RELIANCE.NS
+    name: Reliance Industries
+  - symbol: TCS.NS
+    name: Tata Consultancy Services
+  - symbol: INFY.NS
+    name: Infosys
+  - symbol: HDFCBANK.NS
+    name: HDFC Bank
+  - symbol: ICICIBANK.NS
+    name: ICICI Bank
