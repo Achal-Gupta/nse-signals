@@ -6,7 +6,6 @@ import logging
 from typing import Optional
 
 import pandas as pd
-import pandas_ta as ta
 
 from lib.contracts import Signal, ACTION_BUY, ACTION_SELL, ACTION_HOLD
 
@@ -15,6 +14,24 @@ logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
 OVERSOLD = 30.0
 OVERBOUGHT = 70.0
+
+
+def _compute_rsi(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
+    """
+    Compute Wilder's RSI using EMA smoothing.
+    Equivalent to the classic pandas-ta / TA-Lib RSI implementation.
+    """
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+
+    # Wilder's smoothing = EMA with alpha = 1/period, adjust=False
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 
 def _rsi_to_confidence(rsi: float) -> tuple[str, float]:
@@ -48,8 +65,9 @@ def analyze(symbol: str, df: Optional[pd.DataFrame]) -> Signal:
 
     try:
         close = df["Close"]
-        rsi_series = ta.rsi(close, length=RSI_PERIOD)
-        if rsi_series is None or rsi_series.dropna().empty:
+        rsi_series = _compute_rsi(close, RSI_PERIOD)
+        rsi_clean = rsi_series.dropna()
+        if rsi_clean.empty:
             return Signal(
                 agent="technical",
                 symbol=symbol,
@@ -58,7 +76,7 @@ def analyze(symbol: str, df: Optional[pd.DataFrame]) -> Signal:
                 reason="RSI computation returned empty",
                 metrics={},
             )
-        rsi = float(rsi_series.dropna().iloc[-1])
+        rsi = float(rsi_clean.iloc[-1])
         action, confidence = _rsi_to_confidence(rsi)
 
         if action == ACTION_BUY:
