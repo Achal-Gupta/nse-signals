@@ -51,7 +51,7 @@ def get_index_snapshot(symbol: str) -> Optional[dict]:
     Returns: {"close": float, "pct_change": float} or None.
     """
     try:
-        df = yf.download(symbol, period="2d", interval="1d", progress=False, auto_adjust=True)
+        df = yf.download(symbol, period="5d", interval="1d", progress=False, auto_adjust=True)
         if df is None or df.empty or len(df) < 2:
             return None
         if isinstance(df.columns, pd.MultiIndex):
