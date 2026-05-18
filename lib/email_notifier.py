@@ -1,6 +1,6 @@
 """
-Email notifier via Gmail SMTP.
-Sends HTML email with the day's signals.
+Email notifier for v0.2.0. Sends HTML email with consolidated signals plus
+per-indicator detail and regime context.
 """
 import os
 import smtplib
@@ -18,8 +18,20 @@ def _action_emoji(action: str) -> str:
     return {ACTION_BUY: "🟢", ACTION_SELL: "🔴", ACTION_HOLD: "⚪"}.get(action, "❓")
 
 
+def _indicator_summary(v: Verdict) -> str:
+    """One-line per-indicator action summary."""
+    parts = []
+    for key in ("rsi", "macd", "bollinger", "vwap"):
+        sig = v.per_agent_signals.get(key)
+        if sig:
+            parts.append(f"{key.upper()}:{sig.action[0]}")
+    sent = v.fused_sentiment_signal
+    if sent:
+        parts.append(f"SENT:{sent.action[0]}")
+    return " · ".join(parts)
+
+
 def _build_html(verdicts: List[Verdict], errors: List[str]) -> tuple[str, str]:
-    """Returns (subject, html_body)."""
     if not verdicts and not errors:
         return ("📊 NSE Signals · no data", "<p>No data generated this run.</p>")
 
@@ -28,25 +40,42 @@ def _build_html(verdicts: List[Verdict], errors: List[str]) -> tuple[str, str]:
     holds = [v for v in verdicts if v.action == ACTION_HOLD]
 
     timestamp = verdicts[0].timestamp_ist if verdicts else ""
-    subject = f"📊 NSE Signals · {len(buys)} BUY · {len(sells)} SELL · {timestamp[-8:-3] if timestamp else ''}"
+    subject = (
+        f"📊 NSE Signals · {len(buys)} BUY · {len(sells)} SELL · "
+        f"{timestamp[-8:-3] if timestamp else ''}"
+    )
 
     market_html = ""
+    regime_html = ""
     if verdicts:
         m = verdicts[0].market_signal
         market_html = (
             f"<p><b>Market:</b> {_action_emoji(m.action)} {m.action} "
             f"({int(m.confidence * 100)}%) — {m.reason}</p>"
         )
+        r = verdicts[0].regime
+        if r:
+            regime_parts = []
+            if r.vix_level is not None:
+                regime_parts.append(f"VIX {r.vix_level:.1f}")
+            if r.nifty_pct is not None:
+                regime_parts.append(f"Nifty {r.nifty_pct:+.2f}%")
+            if r.nifty_5d_pct is not None:
+                regime_parts.append(f"Nifty 5d {r.nifty_5d_pct:+.2f}%")
+            if regime_parts:
+                regime_html = f"<p style='color:#6b7280;'>Regime: {' · '.join(regime_parts)}</p>"
 
     rows_html = ""
     for v in buys + sells:
+        color = "#22c55e" if v.action == ACTION_BUY else "#ef4444"
         rows_html += (
-            f"<div style='margin: 12px 0; padding: 10px; border-left: 4px solid "
-            f"{'#22c55e' if v.action == ACTION_BUY else '#ef4444'};'>"
+            f"<div style='margin: 12px 0; padding: 10px; border-left: 4px solid {color};'>"
             f"<b>{_action_emoji(v.action)} {v.symbol} — {v.action} "
             f"({int(v.confidence * 100)}%)</b><br>"
-            f"• Technical: {v.technical_signal.reason}<br>"
-            f"• Sentiment: {v.sentiment_signal.reason}"
+            f"<span style='font-family:monospace; font-size:12px; color:#6b7280;'>"
+            f"{_indicator_summary(v)} · score={v.aggregator_score:+.2f}</span><br>"
+            f"<b>Price:</b> ₹{v.price_at_signal:.2f}<br>"
+            f"<b>Sentiment:</b> {v.fused_sentiment_signal.reason if v.fused_sentiment_signal else ''}"
             f"</div>"
         )
 
@@ -63,21 +92,18 @@ def _build_html(verdicts: List[Verdict], errors: List[str]) -> tuple[str, str]:
     body = f"""
     <html><body style='font-family: -apple-system, sans-serif;'>
     {market_html}
+    {regime_html}
     {rows_html}
     {holds_html}
     {errors_html}
     <hr>
-    <p style='color:#6b7280; font-size:12px;'>NSE Signals v0.1.0 · {timestamp}</p>
+    <p style='color:#6b7280; font-size:12px;'>NSE Signals v0.2.0 · {timestamp}</p>
     </body></html>
     """
     return subject, body
 
 
 def send_email(verdicts: List[Verdict], errors: List[str]) -> None:
-    """
-    Send signals email. Reads SMTP credentials from environment:
-      GMAIL_USER, GMAIL_APP_PASSWORD, ALERT_EMAIL_TO
-    """
     user = os.environ["GMAIL_USER"]
     password = os.environ["GMAIL_APP_PASSWORD"]
     to_addr = os.environ["ALERT_EMAIL_TO"]
