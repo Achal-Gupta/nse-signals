@@ -34,4 +34,4 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           GOOGLE_SHEETS_CREDS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDS_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        run: python orchestrator.py --force
+        run: python orchestrator.py
