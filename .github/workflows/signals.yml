@@ -1,17 +1,12 @@
 name: NSE Signals
 
 on:
-  push: 
-  workflow_dispatch: 
+  workflow_dispatch:
   
   schedule:
-    # Every 15 min between 03:45 and 10:00 UTC (= 09:15-15:30 IST), Mon-Fri.
-    # GitHub Actions cron uses UTC. IST = UTC + 5:30.
-    # 09:15 IST = 03:45 UTC; 15:30 IST = 10:00 UTC.
     - cron: "45 3 * * 1-5"
     - cron: "0,15,30,45 4-9 * * 1-5"
     - cron: "0 10 * * 1-5"
-  #workflow_dispatch:  # allows manual trigger from the GitHub mobile web
 
 jobs:
   signals:
