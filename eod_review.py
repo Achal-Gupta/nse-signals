@@ -1,6 +1,8 @@
 """
-End-of-day review job. Runs once per trading day after market close.
-Closes pending paper trades from the previous trading day.
+End-of-day review job (v0.3.0).
+
+Runs daily after market close. Scans the Signals sheet and fills in any
+newly-knowable outcome columns across 4 horizons (eod, 1d, 3d, 5d).
 """
 import sys
 import logging
@@ -26,9 +28,9 @@ def main() -> int:
         logger.error(str(e))
         return 1
 
-    logger.info("Starting end-of-day paper trade review...")
-    close_pending_trades(lookback_days=1)
-    logger.info("EOD review complete")
+    logger.info("Starting EOD review (multi-horizon outcome closure)...")
+    result = close_pending_trades()
+    logger.info(f"EOD review summary: {result}")
     return 0
 
 

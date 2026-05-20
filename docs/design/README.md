@@ -10,3 +10,4 @@ Each version has its own folder with three files:
 
 - [v0.1.0](v0.1.0/) — MVP with 2 agents (Technical RSI + 2-tier Sentiment)
 - [v0.2.0](v0.2.0/) — 4 indicators (RSI/MACD/BB/VWAP), LangGraph, score aggregator, paper trading, regime tags
+- [v0.3.0](v0.3.0/) — Universe Agent (40 stocks), multi-horizon outcomes, vectorbt backtester
