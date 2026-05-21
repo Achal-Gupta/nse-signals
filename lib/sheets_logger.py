@@ -1,14 +1,12 @@
 """
-Google Sheets logger for v0.2.0.
+Google Sheets logger for v0.2.1.
 
-Schema captures:
-  - Final verdict + price
-  - Per-indicator (RSI, MACD, BB, VWAP) action + key metric
-  - Sentiment (stock news, market, fused)
-  - Regime context (VIX, Nifty short-term trend)
-  - Outcome columns left blank, filled in by paper_trader EOD job
+Schema change vs v0.2.0:
+- Added `trade_idea_id` column (between aggregator_score and rsi_action)
+- Schema goes from 27 to 28 columns
 
-Documented in docs/design/v0.2.0/contracts.md.
+For HOLDs, trade_idea_id is empty. For BUY/SELL, it groups same-hour same-symbol
+same-action signals so post-hoc analysis can dedupe stickiness.
 """
 import os
 import json
@@ -29,32 +27,33 @@ SHEET_HEADERS = [
     "final_action",             # 3
     "final_confidence",         # 4
     "price_at_signal",          # 5
-    "aggregator_score",         # 6 — raw weighted score, useful for debugging
+    "aggregator_score",         # 6
+    "trade_idea_id",            # 7 (NEW in v0.2.1)
     # Per-indicator detail
-    "rsi_action",               # 7
-    "rsi_value",                # 8
-    "macd_action",              # 9
-    "macd_hist",                # 10
-    "bb_action",                # 11
-    "bb_percent_b",             # 12
-    "vwap_action",              # 13
-    "vwap_distance_pct",        # 14
+    "rsi_action",               # 8
+    "rsi_value",                # 9
+    "macd_action",              # 10
+    "macd_hist",                # 11
+    "bb_action",                # 12
+    "bb_percent_b",             # 13
+    "vwap_action",              # 14
+    "vwap_distance_pct",        # 15
     # Sentiment
-    "stock_sent_action",        # 15
-    "stock_sent_reason",        # 16
-    "market_action",            # 17
-    "market_reason",            # 18
-    "fused_sent_action",        # 19
-    "fused_sent_confidence",    # 20
+    "stock_sent_action",        # 16
+    "stock_sent_reason",        # 17
+    "market_action",            # 18
+    "market_reason",            # 19
+    "fused_sent_action",        # 20
+    "fused_sent_confidence",    # 21
     # Regime
-    "vix_level",                # 21
-    "vix_pct_change",           # 22
-    "nifty_pct",                # 23
-    "nifty_5d_pct",             # 24
-    # Outcome (filled by paper_trader EOD)
-    "outcome_pct",              # 25
-    "outcome_status",           # 26
-    "errors",                   # 27
+    "vix_level",                # 22
+    "vix_pct_change",           # 23
+    "nifty_pct",                # 24
+    "nifty_5d_pct",             # 25
+    # Outcome
+    "outcome_pct",              # 26
+    "outcome_status",           # 27
+    "errors",                   # 28
 ]
 
 
@@ -72,29 +71,21 @@ def _open_sheet():
 
 
 def _ensure_headers(ws) -> None:
-    """Write/repair header row.
-
-    If the sheet is empty, write headers. If existing headers don't match
-    v0.2.0 schema, do nothing — operator must manually clear/migrate. We
-    don't auto-overwrite to avoid clobbering historical data.
-    """
     try:
         first_row = ws.row_values(1)
         if not first_row:
             ws.append_row(SHEET_HEADERS)
-            logger.info("Wrote v0.2.0 headers to empty sheet")
+            logger.info("Wrote v0.2.1 headers to empty sheet")
         elif first_row != SHEET_HEADERS:
             logger.warning(
-                "Existing sheet headers don't match v0.2.0 schema. "
-                "Append-only logging continues but column alignment may drift. "
-                "Manually update the header row or use a new sheet."
+                "Existing sheet headers don't match v0.2.1 schema. "
+                "Manually update the header row or use a new sheet to avoid drift."
             )
     except Exception as e:
         logger.warning(f"Could not verify headers: {e}")
 
 
 def _get_per_agent(verdict: Verdict, name: str):
-    """Safely fetch a Signal from the verdict's per_agent_signals dict."""
     return verdict.per_agent_signals.get(name)
 
 
@@ -116,6 +107,7 @@ def _verdict_to_row(v: Verdict, error: str = "") -> list:
         round(v.confidence, 3),
         round(v.price_at_signal, 2) if v.price_at_signal else "",
         round(v.aggregator_score, 3),
+        v.trade_idea_id,
         # RSI
         rsi.action if rsi else "",
         rsi.metrics.get("rsi", "") if rsi else "",
@@ -140,7 +132,7 @@ def _verdict_to_row(v: Verdict, error: str = "") -> list:
         regime.vix_pct_change if regime else "",
         regime.nifty_pct if regime else "",
         regime.nifty_5d_pct if regime else "",
-        # Outcome (blank, filled later)
+        # Outcome (blank, filled later by EOD)
         "",
         "",
         # Errors
