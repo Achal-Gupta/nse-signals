@@ -1,6 +1,9 @@
 """
 Shared data contracts. Every agent speaks in these shapes.
-See docs/design/v0.2.0/contracts.md for the design rationale.
+See docs/design/v0.2.1/contracts.md for the design rationale.
+
+v0.2.1 changes:
+- Added trade_idea_id to Verdict for signal stickiness dedup
 """
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -9,10 +12,10 @@ from typing import Optional
 @dataclass
 class Signal:
     """A single agent's analysis output."""
-    agent: str            # e.g. "rsi", "macd", "bollinger", "vwap", "market_sentiment", "stock_sentiment", "sentiment_fusion"
-    symbol: Optional[str] # None for market-level signals
-    action: str           # "BUY" | "SELL" | "HOLD"
-    confidence: float     # 0.0 to 1.0
+    agent: str
+    symbol: Optional[str]
+    action: str
+    confidence: float
     reason: str
     metrics: dict = field(default_factory=dict)
 
@@ -39,12 +42,13 @@ class Verdict:
     action: str
     confidence: float
     price_at_signal: float
-    per_agent_signals: dict          # {agent_name: Signal}
+    per_agent_signals: dict
     market_signal: Signal
     fused_sentiment_signal: Signal
     regime: Regime
     timestamp_ist: str
     aggregator_score: float
+    trade_idea_id: str = ""   # v0.2.1: groups stickiness-related signals (same stock+action within 60min)
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +62,7 @@ class Verdict:
             "regime": self.regime.to_dict(),
             "timestamp_ist": self.timestamp_ist,
             "aggregator_score": self.aggregator_score,
+            "trade_idea_id": self.trade_idea_id,
         }
 
 

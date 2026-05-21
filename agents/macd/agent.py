@@ -1,6 +1,18 @@
 """
 MACD Agent — Moving Average Convergence Divergence.
-See agents/macd/skill.md for rule definition.
+
+v0.2.1 change: switched from strict crossover detection to sign-based logic.
+Crossover detection missed signals when the histogram transitioned between
+15-min sampling intervals (we'd see +6.0 at 10:55 and -2.3 at 12:32 — the
+actual crossover happened between samples and was invisible to us).
+
+The new logic uses current state of MACD line and histogram:
+  - hist > 0 AND macd > 0  → BUY (bullish positioning)
+  - hist < 0 AND macd < 0  → SELL (bearish positioning)
+  - mixed signs            → HOLD
+This is standard MACD signal logic (current state, not transition).
+
+See agents/macd/skill.md for the rule definition.
 """
 import logging
 from typing import Optional
@@ -49,37 +61,39 @@ def analyze(symbol: str, df: Optional[pd.DataFrame]) -> Signal:
         macd_line = macd_line.dropna()
         signal_line = signal_line.dropna()
         hist = hist.dropna()
-        if len(hist) < 2:
+        if len(hist) < 1 or len(macd_line) < 1:
             return Signal(agent=AGENT_NAME, symbol=symbol, action=ACTION_HOLD,
                           confidence=0.0, reason="MACD returned empty", metrics={})
 
         last_hist = float(hist.iloc[-1])
-        prev_hist = float(hist.iloc[-2])
         last_macd = float(macd_line.iloc[-1])
+        last_signal = float(signal_line.iloc[-1])
         last_price = float(close.iloc[-1])
 
-        bullish_cross = prev_hist <= 0 and last_hist > 0 and last_macd > 0
-        bearish_cross = prev_hist >= 0 and last_hist < 0 and last_macd < 0
-
-        if bullish_cross:
+        # Sign-based signal logic (v0.2.1 fix)
+        # Both histogram and MACD line must agree on direction.
+        # Histogram > 0 means MACD is above its signal line (momentum building up).
+        # MACD > 0 means short EMA is above long EMA (price trend is up).
+        if last_hist > 0 and last_macd > 0:
             action = ACTION_BUY
             confidence = _hist_to_confidence(last_hist, last_price)
-            reason = f"MACD bullish crossover (hist={last_hist:.3f})"
-        elif bearish_cross:
+            reason = f"MACD bullish (hist=+{last_hist:.3f}, line=+{last_macd:.3f})"
+        elif last_hist < 0 and last_macd < 0:
             action = ACTION_SELL
             confidence = _hist_to_confidence(last_hist, last_price)
-            reason = f"MACD bearish crossover (hist={last_hist:.3f})"
+            reason = f"MACD bearish (hist={last_hist:.3f}, line={last_macd:.3f})"
         else:
+            # Mixed signals — hist and macd disagree on direction
             action = ACTION_HOLD
             confidence = 0.5
-            reason = f"MACD neutral (hist={last_hist:.3f}, line={last_macd:.3f})"
+            reason = f"MACD mixed (hist={last_hist:.3f}, line={last_macd:.3f})"
 
         return Signal(
             agent=AGENT_NAME, symbol=symbol, action=action,
             confidence=round(confidence, 3), reason=reason,
             metrics={
                 "macd_line": round(last_macd, 4),
-                "macd_signal": round(float(signal_line.iloc[-1]), 4),
+                "macd_signal": round(last_signal, 4),
                 "macd_hist": round(last_hist, 4),
             },
         )

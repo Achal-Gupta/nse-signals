@@ -1,33 +1,16 @@
 """
-Orchestrator (v0.2.0) — LangGraph-based pipeline.
+Orchestrator (v0.2.1) — LangGraph-based pipeline with trade_idea_id grouping.
 
-Graph topology:
-    START
-      ↓
-    verify_secrets
-      ↓
-    check_market_hours  ──(closed)──> END
-      ↓ (open or --force)
-    load_watchlist
-      ↓
-    compute_regime          (VIX, Nifty trends)
-      ↓
-    fetch_market_sentiment  (Claude Haiku, once)
-      ↓
-    analyze_per_stock_loop  (per-stock: data + 4 indicators + sentiment + fusion + aggregate)
-      ↓
-    notify_and_log
-      ↓
-    END
+Same topology as v0.2.0. Only change: when building a Verdict, compute the
+trade_idea_id from (symbol, action, timestamp). This lets us dedupe sticky
+signals during analysis.
 """
 import os
 import sys
 import logging
 from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
-from typing import Optional
 
-import yaml
 from langgraph.graph import StateGraph, START, END
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -41,6 +24,7 @@ from lib.email_notifier import send_email
 from lib.sheets_logger import log_verdicts
 from lib.secret_validator import verify_secrets, SecretError
 from lib.aggregator import aggregate as aggregate_signals
+from lib.trade_idea import compute_trade_idea_id
 
 from agents.data_fetcher import get_ohlcv
 from agents.data_fetcher.fetcher import get_index_snapshot
@@ -75,14 +59,15 @@ def in_market_hours(now_ist: datetime) -> bool:
 
 
 def load_watchlist_yaml(path: str = "config/watchlist.yaml") -> list[dict]:
+    import yaml
     with open(path) as f:
         data = yaml.safe_load(f)
     return data.get("stocks", [])
 
 
-# ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 # LangGraph nodes
-# ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 
 def node_check_market_hours(state: TradingState) -> TradingState:
     now_ist = datetime.now(IST)
@@ -104,14 +89,12 @@ def node_load_watchlist(state: TradingState) -> TradingState:
 
 
 def node_compute_regime(state: TradingState) -> TradingState:
-    """Fetch regime indicators (VIX + Nifty trends)."""
     import yfinance as yf
     import pandas as pd
 
     vix_snap = get_index_snapshot(INDIA_VIX)
     nifty_snap = get_index_snapshot(NIFTY_50)
 
-    # Compute Nifty 5-day percent change
     nifty_5d = None
     try:
         df = yf.download(NIFTY_50, period="10d", interval="1d",
@@ -148,7 +131,6 @@ def node_market_sentiment(state: TradingState) -> TradingState:
 
 
 def node_analyze_per_stock(state: TradingState) -> TradingState:
-    """Per-stock loop: fetch + 4 indicators + sentiment + fusion + aggregate."""
     verdicts: list[Verdict] = []
     errors: list[str] = list(state.get("errors", []))
     watchlist = state["watchlist"]
@@ -159,17 +141,15 @@ def node_analyze_per_stock(state: TradingState) -> TradingState:
     for stock in watchlist:
         symbol = stock["symbol"]
         name = stock["name"]
-        logger.info(f"--- {symbol} ---")
         try:
+            logger.info(f"--- {symbol} ---")
             df = get_ohlcv(symbol, period="5d", interval="15m")
 
-            # Indicator agents (rule-based, no LLM)
             rsi_sig = rsi_analyze(symbol, df)
             macd_sig = macd_analyze(symbol, df)
             bb_sig = bb_analyze(symbol, df)
             vwap_sig = vwap_analyze(symbol, df)
 
-            # Sentiment (LLM-based)
             stock_sent = stock_sentiment_analyze(symbol, name)
             fused_sent = fuse_sentiment(market_signal, stock_sent)
 
@@ -183,13 +163,15 @@ def node_analyze_per_stock(state: TradingState) -> TradingState:
 
             action, confidence, raw_score = aggregate_signals(per_agent)
 
-            # Capture current price for paper trader's later use
             price_at_signal = 0.0
             try:
                 if df is not None and not df.empty:
                     price_at_signal = float(df["Close"].iloc[-1])
             except Exception:
                 pass
+
+            # v0.2.1: compute trade_idea_id for dedup
+            idea_id = compute_trade_idea_id(symbol, action, timestamp)
 
             verdicts.append(Verdict(
                 symbol=symbol,
@@ -202,12 +184,14 @@ def node_analyze_per_stock(state: TradingState) -> TradingState:
                 regime=regime,
                 timestamp_ist=timestamp,
                 aggregator_score=raw_score,
+                trade_idea_id=idea_id,
             ))
+            idea_suffix = f" [idea={idea_id}]" if idea_id else ""
             logger.info(
                 f"{symbol}: {action} ({confidence:.2f}, score={raw_score:+.2f}) | "
                 f"RSI:{rsi_sig.action[0]} MACD:{macd_sig.action[0]} "
                 f"BB:{bb_sig.action[0]} VWAP:{vwap_sig.action[0]} "
-                f"SENT:{fused_sent.action[0]}"
+                f"SENT:{fused_sent.action[0]}{idea_suffix}"
             )
         except Exception as e:
             err_msg = f"{symbol}: {type(e).__name__}: {e}"
@@ -236,12 +220,7 @@ def node_notify_and_log(state: TradingState) -> TradingState:
     return {"errors": errors}
 
 
-# ────────────────────────────────────────────────────────────
-# Graph wiring
-# ────────────────────────────────────────────────────────────
-
 def should_continue(state: TradingState) -> str:
-    """Conditional edge: skip the rest if outside market hours."""
     return "skip" if state.get("skipped") else "continue"
 
 
@@ -278,7 +257,7 @@ def run() -> int:
         return 1
 
     app = build_graph()
-    final_state = app.invoke({})
+    app.invoke({})
     return 0
 
 
