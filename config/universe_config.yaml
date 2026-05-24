@@ -1,0 +1,9 @@
+# Universe Agent configuration. See docs/design/v0.3.0/decisions.md for rationale.
+
+# How many stocks to pick from each pool
+pool1_count: 20    # Nifty 100 baseline (filtered by liquidity)
+pool2_count: 20    # News-hybrid (mentions + movers)
+
+# Liquidity threshold for Pool 1
+# 5e8 = ₹50 crore minimum average daily traded value over last 5 days
+min_volume_value: 500000000
