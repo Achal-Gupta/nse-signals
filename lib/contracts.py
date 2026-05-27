@@ -1,9 +1,5 @@
 """
 Shared data contracts. Every agent speaks in these shapes.
-See docs/design/v0.2.1/contracts.md for the design rationale.
-
-v0.2.1 changes:
-- Added trade_idea_id to Verdict for signal stickiness dedup
 """
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -36,6 +32,20 @@ class Regime:
 
 
 @dataclass
+class Universe:
+    """Today's stock universe selected by the Universe Agent."""
+    timestamp_ist: str
+    stocks: list[dict]
+    pool1_size: int
+    pool2_size: int
+    overlaps: int
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Verdict:
     """The aggregator's final per-stock conclusion."""
     symbol: str
@@ -48,7 +58,8 @@ class Verdict:
     regime: Regime
     timestamp_ist: str
     aggregator_score: float
-    trade_idea_id: str = ""   # v0.2.1: groups stickiness-related signals (same stock+action within 60min)
+    trade_idea_id: str = ""
+    universe_source: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +74,7 @@ class Verdict:
             "timestamp_ist": self.timestamp_ist,
             "aggregator_score": self.aggregator_score,
             "trade_idea_id": self.trade_idea_id,
+            "universe_source": self.universe_source,
         }
 
 
@@ -70,3 +82,6 @@ ACTION_BUY = "BUY"
 ACTION_SELL = "SELL"
 ACTION_HOLD = "HOLD"
 VALID_ACTIONS = {ACTION_BUY, ACTION_SELL, ACTION_HOLD}
+
+OUTCOME_HORIZONS = ["eod", "1d", "3d", "5d"]
+HORIZON_DAYS = {"eod": 0, "1d": 1, "3d": 3, "5d": 5}
